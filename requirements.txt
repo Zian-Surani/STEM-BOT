@@ -1,0 +1,60 @@
+###############################################################################
+# CORE APP
+###############################################################################
+streamlit==1.38.0
+python-dotenv==1.0.1
+pillow==10.4.0
+pdfminer.six==20231228
+pypdf==4.3.1
+sympy==1.13.2
+
+###############################################################################
+# HUGGING FACE + TRANSFORMERS STACK
+# (Use HF Inference API via huggingface_hub; sentence-transformers needs torch)
+###############################################################################
+huggingface_hub==0.24.6
+transformers==4.44.2
+sentence-transformers==3.0.1
+
+# Torch: pick a CPU wheel that’s widely compatible. For GPU, install CUDA builds
+# from https://pytorch.org if you have NVidia GPUs.
+# NOTE: PyTorch wheels may lag on Python 3.13. Prefer Python 3.10–3.12.
+torch==2.3.1 ; python_version < "3.13"
+
+###############################################################################
+# VECTORS / RETRIEVAL
+###############################################################################
+# FAISS CPU wheels are available for most common Python versions on Windows/macOS/Linux.
+# If you hit wheel issues on 3.13, temporarily comment this and the app will still run
+# (retrieval disabled). Or install from conda-forge.
+faiss-cpu==1.8.0.post1
+
+# Numpy pin known to play nicely with faiss + torch + transformers across OSes.
+# If your environment already brings a newer numpy that works, you can relax this.
+numpy==1.26.4
+
+###############################################################################
+# OCR STACK — 3-LAYER FALLBACK
+# 1) PaddleOCR (best), 2) EasyOCR (no Paddle needed), 3) Tesseract (system binary)
+###############################################################################
+# PaddleOCR (and PaddlePaddle) — may not have wheels on very new Python versions.
+# If this fails to install on your machine, you can comment these lines and rely on EasyOCR/Tesseract.
+paddleocr==2.7.0.3
+# Windows CPU wheel (skipped automatically on non-Windows)
+paddlepaddle==2.6.1 ; platform_system == "Windows"
+
+# EasyOCR (pure-Python; slower than Paddle but installs easily)
+easyocr==1.7.1
+# EasyOCR requires torch (already listed above) and often opencv
+opencv-python==4.10.0.84
+
+# Tesseract Python binding (requires the OS binary: see notes below)
+pytesseract==0.3.10
+
+###############################################################################
+# UTILITIES / NETWORK
+###############################################################################
+requests==2.32.3
+tqdm==4.66.5
+beautifulsoup4==4.12.3
+lxml==4.9.3
