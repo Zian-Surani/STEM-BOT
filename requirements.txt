@@ -1,4 +1,12 @@
 ###############################################################################
+# WEB APP REQUIREMENTS
+###############################################################################
+fastapi
+uvicorn[standard]
+python-multipart     # for file uploads
+pydantic
+
+###############################################################################
 # CORE APP
 ###############################################################################
 streamlit==1.38.0
@@ -27,7 +35,7 @@ torch==2.3.1 ; python_version < "3.13"
 # FAISS CPU wheels are available for most common Python versions on Windows/macOS/Linux.
 # If you hit wheel issues on 3.13, temporarily comment this and the app will still run
 # (retrieval disabled). Or install from conda-forge.
-faiss-cpu==1.8.0.post1
+faiss-cpu
 
 # Numpy pin known to play nicely with faiss + torch + transformers across OSes.
 # If your environment already brings a newer numpy that works, you can relax this.
