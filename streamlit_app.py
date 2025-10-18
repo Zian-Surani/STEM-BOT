@@ -1,14 +1,6 @@
 # app.py
 # STEM Bot — Math (SymPy) + Science/Social (HF Inference API via Hugging Face)
-# Features:
-# - In-memory OCR chain (PaddleOCR → EasyOCR → Tesseract)
-# - In-memory PDF text extraction (pdfminer; pypdf fallback)
-# - Strict subject routing: Math→SymPy; Sci/Socio→LLM
-# - Math tasks: Evaluate / Integrate / Differentiate / Simplify / Limit / Solve / Probability
-# - OCR math normalization: handles "∫ ... dx", "logx", implicit mult "2x", trailing '^'
-# - Auto-uses OCR/PDF text if Subject=Math and text box is empty
-# - Optional FAISS retrieval (bge-small)
-# - LaTeX rendering; dedup answers; text wraps within width
+# NOTE: Hard-coding API keys is unsafe. Prefer Streamlit secrets or env vars.
 
 import os, io, json
 from typing import List, Optional, Tuple, Dict
@@ -22,6 +14,7 @@ import sympy.stats as sps
 import faiss
 from sentence_transformers import SentenceTransformer
 from huggingface_hub import InferenceClient
+from huggingface_hub.utils import HfHubHTTPError
 import regex as re
 
 # ---------- SymPy parsing with implicit multiplication ----------
@@ -33,33 +26,32 @@ from sympy.parsing.sympy_parser import (
 )
 
 TRANSFORMS = standard_transformations + (
-    implicit_multiplication_application,  # 2x -> 2*x, x(y+1) -> x*(y+1)
-    function_exponentiation,              # sin^2(x) -> sin(x)**2
+    implicit_multiplication_application,
+    function_exponentiation,
 )
 
 # ---------- Config ----------
-HF_TOKEN = st.secrets.get("HF_API_TOKEN") or os.environ.get("HF_API_TOKEN") or "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"
+# !! WARNING: Hard-coding tokens is insecure. You asked to inline it explicitly:
+HF_TOKEN = "YOUR TOKEN"
+
 HF_MODEL_SCI   = "Qwen/Qwen2.5-7B-Instruct"
 HF_MODEL_SOCIO = "Qwen/Qwen2.5-7B-Instruct"
-HF_MODEL_FALLBACK = "HuggingFaceH4/zephyr-7b-beta"  # safe fallback if provider permissions fail
+HF_MODEL_FALLBACK = "HuggingFaceH4/zephyr-7b-beta"  # public conversational fallback
 
 EMBED_MODEL_ID = "BAAI/bge-small-en-v1.5"
 MAX_CTX_SNIPPET = 1600
-
-# bump these to force-refresh cached resources
 OCR_CACHE_VERSION = "v3"
 PDF_CACHE_VERSION = "v2"
 
-# ---------- OCR backends (all in-memory; no temp files) ----------
+# ---------- Page ----------
+st.set_page_config(page_title="STEM Bot", layout="wide")
+
+# ---------- OCR backends ----------
 @st.cache_resource(show_spinner=False)
 def get_ocr(version: str = OCR_CACHE_VERSION):
-    """
-    Returns (fns, names) — lists of callables and their names.
-    Each callable: fn(PIL.Image) -> str (extracted text)
-    """
     fns, names = [], []
 
-    # PaddleOCR (numpy array)
+    # PaddleOCR
     try:
         from paddleocr import PaddleOCR
         paddle = PaddleOCR(use_angle_cls=True, lang="en")
@@ -76,7 +68,7 @@ def get_ocr(version: str = OCR_CACHE_VERSION):
     except Exception:
         pass
 
-    # EasyOCR (numpy array)
+    # EasyOCR
     try:
         import easyocr
         reader = easyocr.Reader(['en'], gpu=False)
@@ -88,7 +80,7 @@ def get_ocr(version: str = OCR_CACHE_VERSION):
     except Exception:
         pass
 
-    # Tesseract (PIL image)
+    # Tesseract
     try:
         import pytesseract
         tess_path = os.environ.get("TESSERACT_PATH")
@@ -103,10 +95,6 @@ def get_ocr(version: str = OCR_CACHE_VERSION):
     return fns, names
 
 def run_ocr_chain(img: Image.Image) -> Tuple[str, str]:
-    """
-    Try in-memory OCR backends Paddle → EasyOCR → Tesseract.
-    Returns (text, backend_name). Raises last error if all fail.
-    """
     fns, names = get_ocr()
     last_err = None
     for fn, name in zip(fns, names):
@@ -122,19 +110,12 @@ def run_ocr_chain(img: Image.Image) -> Tuple[str, str]:
         raise last_err
     return "", "None"
 
-# ---------- PDF text extraction (in-memory) ----------
+# ---------- PDF text extraction ----------
 @st.cache_resource(show_spinner=False)
 def get_pdf_backend(version: str = PDF_CACHE_VERSION):
-    """
-    Returns a callable that extracts text from PDF bytes purely in memory.
-    Primary: pdfminer.six on BytesIO
-    Fallback: pypdf (if installed)
-    """
     def pdfminer_extract(pdf_bytes: bytes) -> str:
         bio = io.BytesIO(pdf_bytes)
         return extract_text(bio) or ""
-
-    # Optional fallback to pypdf
     try:
         from pypdf import PdfReader
         def pypdf_extract(pdf_bytes: bytes) -> str:
@@ -151,11 +132,6 @@ def get_pdf_backend(version: str = PDF_CACHE_VERSION):
         return pdfminer_extract, None
 
 def extract_pdf_text_inmemory(uploaded_file) -> str:
-    """
-    uploaded_file: Streamlit UploadedFile
-    Returns: extracted text (str)
-    Tries pdfminer on BytesIO; if fails, tries pypdf (if available).
-    """
     pdf_bytes = uploaded_file.getvalue()
     primary, fallback = get_pdf_backend()
     try:
@@ -179,30 +155,62 @@ def get_embedder():
     return SentenceTransformer(EMBED_MODEL_ID)
 
 @st.cache_resource(show_spinner=False)
-def get_llm(model_id: str):
-    return InferenceClient(model=model_id, token=HF_TOKEN)
+def get_llm_client():
+    # Use HF conversational API. This avoids the Together/OpenAI router that causes 401 if misconfigured.
+    return InferenceClient(api_key=HF_TOKEN)  # token=HF_TOKEN also works
 
 def _is_permissions_error(msg: str) -> bool:
     s = (msg or "").lower()
     return "403" in s and ("forbidden" in s or "insufficient" in s or "provider" in s)
 
+def _is_auth_error(e: Exception) -> bool:
+    s = str(e).lower()
+    return "401" in s or "unauthorized" in s or "invalid credentials" in s
+
 def chat_once(model_id: str, messages, temperature=0.18, top_p=0.85, max_tokens=900) -> str:
-    client = get_llm(model_id)
+    client = get_llm_client()
     try:
-        resp = client.chat_completion(
-            model=model_id, messages=messages,
-            max_tokens=max_tokens, temperature=temperature, top_p=top_p
+        resp = client.chat.completions.create(
+            model=model_id,
+            messages=messages,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
         )
-        return resp.choices[0].message.get("content","") if resp and resp.choices else ""
-    except Exception as e:
-        if _is_permissions_error(str(e)):
-            fb = get_llm(HF_MODEL_FALLBACK)
-            resp = fb.chat_completion(
-                model=HF_MODEL_FALLBACK, messages=messages,
-                max_tokens=max_tokens, temperature=temperature, top_p=top_p
-            )
-            return resp.choices[0].message.get("content","") if resp and resp.choices else ""
+        text = resp.choices[0].message.content if (resp and resp.choices) else ""
+        return (text or "No answer returned.").strip()
+
+    except HfHubHTTPError as e:
+        s = str(e).lower()
+        if ("401" in s or "unauthorized" in s or "invalid credentials" in s
+            or "403" in s or "forbidden" in s or "insufficient" in s):
+            try:
+                resp = client.chat.completions.create(
+                    model=HF_MODEL_FALLBACK,
+                    messages=messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                )
+                text = resp.choices[0].message.content if (resp and resp.choices) else ""
+                return (text or "No answer returned.").strip()
+            except Exception as e2:
+                return f"[LLM error] {e2}"
         return f"[LLM error] {e}"
+
+    except Exception as e:
+        try:
+            resp = client.chat.completions.create(
+                model=HF_MODEL_FALLBACK,
+                messages=messages,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+            )
+            text = resp.choices[0].message.content if (resp and resp.choices) else ""
+            return (text or "No answer returned.").strip()
+        except Exception as e2:
+            return f"[LLM error] {e2}"
 
 # ---------- Dedup / cleanup ----------
 SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
@@ -210,7 +218,6 @@ PARA_SPLIT = re.compile(r"\n{2,}")
 
 def clean_repeats_final(text: str) -> str:
     if not text: return text
-    # collapse repeated suffix blocks
     for win in range(400, 40, -20):
         if len(text) >= 2*win and text[-2*win:-win] == text[-win:]:
             while len(text) >= 2*win and text[-2*win:-win] == text[-win:]:
@@ -236,49 +243,31 @@ INT_SIGN_PAT = re.compile(r"∫\s*(.*?)\s*d\s*([a-zA-Z])\b", re.S)
 INTEGRAL_TEXT_PAT = re.compile(r"(?:integral\s+of|integrate)\s+(.+)", re.I)
 
 def normalize_ocr_math(q: str) -> str:
-    """
-    - If OCR text contains '∫ ... d<var>', rewrite to 'integrate <expr>'
-    - Remove lingering 'd<var>' tokens, kill trailing '^' or '**'
-    """
     if not q:
         return q
     s = q.strip()
-
     m = INT_SIGN_PAT.search(s)
     if m:
         integrand, var = m.group(1).strip(), m.group(2)
         integrand = re.sub(rf"(?i)\bd\s*{re.escape(var)}\b", "", integrand).strip()
         s = f"integrate {integrand}"
-
-    s = re.sub(r"(\*\*|\^)\s*$", "", s)             # drop dangling power
-    s = re.sub(r"(?i)\bd\s*[a-z]\b", "", s)         # remove 'dx', 'd x', etc.
+    s = re.sub(r"(\*\*|\^)\s*$", "", s)
+    s = re.sub(r"(?i)\bd\s*[a-z]\b", "", s)
     s = re.sub(r"\s{2,}", " ", s).strip()
     return s
 
 def _clean_expr_text(s: str) -> str:
     s = (s or "").strip()
-
-    # Normalize operators/unicode
     s = s.replace("−", "-").replace("–", "-").replace("—", "-")
     s = s.replace("×", "*").replace("·", "*").replace("∙", "*")
     s = s.replace("÷", "/").replace("√", "sqrt")
-    s = s.replace("^", "**")  # x^2 -> x**2
-
-    # Common OCR joins: 'logx' -> 'log(x)', 'sinx' -> 'sin(x)' etc.
+    s = s.replace("^", "**")
     s = re.sub(r"\b(log|ln|sin|cos|tan|sec|csc|cot)\s*([A-Za-z0-9(])", r"\1(\2", s)
     s = re.sub(r"\b(log|ln|sin|cos|tan|sec|csc|cot)\(([^()]*?)(?=\s|$|[+\-*/^=)])", r"\1(\2)", s)
-
-    # "log x" / "ln x" -> log(x)
     s = re.sub(r"\blog\s+([A-Za-z0-9_.]+)\b", r"log(\1)", s)
     s = re.sub(r"\bln\s+([A-Za-z0-9_.]+)\b", r"log(\1)", s)
-
-    # Remove differentials 'dx','dy' left as factors
     s = re.sub(r"(?i)\bd\s*[a-z]\b", "", s)
-
-    # Remove dangling powers at end
     s = re.sub(r"(\*\*|\^)\s*$", "", s)
-
-    # Collapse spaces
     s = re.sub(r"\s{2,}", " ", s).strip()
     return s
 
@@ -343,9 +332,6 @@ X = sp.symbols("x")
 LIMIT_TEXT_PAT = re.compile(r"limit(?:\s+of)?\s+(.*?)\s+as\s+x\s*->\s*([^\s]+)", re.I)
 
 def parse_integral_text(q: str) -> Optional[Tuple[str, str]]:
-    """
-    Returns (integrand_text, var) if '∫ ... d<var>' or 'integral of ...' pattern found.
-    """
     m = INT_SIGN_PAT.search(q)
     if m:
         integrand, var = m.group(1).strip(), m.group(2)
@@ -459,7 +445,7 @@ def prob_query(text: str) -> str:
     elif re.match(r"(?is)^coin", q):
         pm = re.search(r"p\s*=\s*([0-9]*\.?[0-9]+)", q)
         p = float(pm.group(1)) if pm else 0.5
-        X = sps.Bernoulli('X', p)  # 1=heads
+        X = sps.Bernoulli('X', p)
         tail = q[q.lower().find('coin')+4:].strip()
     elif re.match(r"(?is)^binomial", q):
         nm = re.search(r"n\s*=\s*([0-9]+)", q); pm = re.search(r"p\s*=\s*([0-9]*\.?[0-9]+)", q)
@@ -528,18 +514,12 @@ def prob_query(text: str) -> str:
         return f"❌ Could not compute probability: {e}\n\n" + PROB_HELP
 
 def solve_math_question(question: str, math_task: str = "Auto") -> str:
-    """
-    math_task: Auto | Evaluate | Integrate | Differentiate | Simplify | Limit | Solve | Probability
-    """
     q = (question or "").strip()
     if not q:
         return "❓ Please enter a math question."
-
-    # Normalize OCR quirks first (handles '∫ ... d x' and stray '^')
     q = normalize_ocr_math(q)
     qlow = q.lower()
 
-    # Prefer explicit integral sign/wording parsing if present
     pair = parse_integral_text(q)
     if pair and (math_task in ("Auto","Integrate")):
         integrand_txt, var = pair
@@ -547,7 +527,7 @@ def solve_math_question(question: str, math_task: str = "Auto") -> str:
             sym_var = sp.Symbol(var)
             expr = parse_expr(_clean_expr_text(integrand_txt),
                               transformations=TRANSFORMS, evaluate=True)
-            res = sp.integrate(expr, sym_var)  # indefinite
+            res = sp.integrate(expr, sym_var)
             return (
                 "Integrate:\n\n"
                 f"$$ {sp.latex(expr)}\\, d{sp.latex(sym_var)} $$\n\n"
@@ -594,7 +574,6 @@ def solve_math_question(question: str, math_task: str = "Auto") -> str:
         except Exception as e:
             return f"❌ Could not simplify: {e}"
 
-    # Fallbacks: evaluate vs integrate vs simplify
     try:
         expr = _expr_from_text(q)
         has_symbols = bool(expr.free_symbols)
@@ -624,7 +603,6 @@ def solve_math_question(question: str, math_task: str = "Auto") -> str:
         return f"⚠️ I couldn't parse the math expression: {e}\nTry: `Evaluate 2+3`, `solve x^2-5x+6=0`, or `prob: normal(mu=0,sigma=1) P(-1<X<2)`."
 
 # ---------- UI ----------
-st.set_page_config(page_title="STEM Bot", layout="wide")
 st.title("🤖 STEM Bot — SymPy Math + LLM (Science/Social)")
 
 with st.sidebar:
@@ -647,7 +625,8 @@ with st.sidebar:
     default_model = HF_MODEL_SCI if subject=="sci" else (HF_MODEL_SOCIO if subject=="socio" else "")
     model_id = st.text_input("HF chat model (for Sci/Socio)", value=default_model)
 
-    # Maintenance helpers
+    st.caption("🔐 Using hard-coded HF token (not recommended)")
+
     if st.button("♻️ Reset OCR cache"):
         get_ocr.clear(); st.success("OCR cache cleared.")
     if st.button("♻️ Reset PDF cache"):
@@ -659,7 +638,6 @@ if "index" not in st.session_state: st.session_state.index=None
 if "meta" not in st.session_state: st.session_state.meta=[]
 if "retriever_ready" not in st.session_state: st.session_state.retriever_ready=False
 if "generating" not in st.session_state: st.session_state.generating=False
-st.session_state.mode = mode
 
 # Controls
 cA, cB, cC = st.columns([1,1,3])
@@ -697,27 +675,23 @@ with left:
     if go:
         st.session_state.generating=True
         try:
-            # retrieval context for LLM
             ctx=[]
             if use_retrieval and st.session_state.retriever_ready and (question and question.strip()):
                 embedder = get_embedder()
                 hits = search_index(st.session_state.index, st.session_state.meta, question, embedder, k=top_k)
                 ctx.extend([h[1]["text"][:MAX_CTX_SNIPPET] for h in hits])
 
-            # --- PDF extraction (in-memory) ---
             if up_pdf is not None:
                 try:
                     text = extract_pdf_text_inmemory(up_pdf) or ""
                     if text.strip():
                         ctx.append(text[:MAX_CTX_SNIPPET])
                         st.success("PDF text extracted in-memory.")
-                        # If Math selected and question empty, use the first line of the PDF text
                         if subject == "math" and not (question and question.strip()):
                             question = text.strip().split("\n")[0]
                 except Exception as e:
                     st.error(f"PDF parse failed: {e}")
 
-            # --- Image OCR (in-memory) ---
             if up_img is not None:
                 try:
                     img = Image.open(up_img).convert("RGB")
@@ -725,19 +699,16 @@ with left:
                     if ocr_text.strip():
                         ctx.append(ocr_text[:MAX_CTX_SNIPPET])
                         st.success(f"OCR extracted text using {backend}.")
-                        # If Math selected and question empty, use the first line of the OCR text
                         if subject == "math" and not (question and question.strip()):
                             question = ocr_text.strip().split("\n")[0]
                 except Exception as e:
                     st.error(f"OCR failed: {e}")
 
-            # show user message (after we may have auto-filled question)
             user_disp = question or ""
             if options_block and (options_block or "").strip():
                 user_disp += "\n\nOptions:\n" + options_block.strip()
             st.session_state.messages.append({"role":"user","content":user_disp})
 
-            # ---------- Routing (strict by subject; optional auto-detect) ----------
             auto_math = is_math_question_conservative(question or "") if auto_detect_math else False
             use_math = (subject == "math") or auto_math
             if auto_math and subject != "math":
@@ -752,8 +723,11 @@ with left:
                 usr = user_prompt(subject, mode, question or "", opts, ctx)
                 chosen = (model_id or "").strip() or (HF_MODEL_SCI if subject=="sci" else HF_MODEL_SOCIO)
                 with st.spinner("🤔 Thinking…"):
-                    text = chat_once(chosen, [{"role":"system","content":sys},{"role":"user","content":usr}],
-                                     temperature=temperature, top_p=0.85, max_tokens=1000)
+                    text = chat_once(
+                        chosen,
+                        [{"role":"system","content":sys},{"role":"user","content":usr}],
+                        temperature=temperature, top_p=0.85, max_tokens=1000
+                    )
                 final = clean_repeats_final(text).strip() or "No answer returned."
 
             st.session_state.messages.append({"role":"assistant","content":final})
@@ -761,12 +735,10 @@ with left:
         finally:
             st.session_state.generating=False
 
-    # Render Chat (LaTeX-aware, wrapped width)
     st.subheader("Chat")
     for m in st.session_state.messages:
         with st.chat_message("user" if m["role"]=="user" else "assistant"):
             txt = m["content"]
-            # Render $$...$$ as LaTeX blocks, plain text otherwise
             blocks = list(re.finditer(r"\$\$(.+?)\$\$", txt, re.S))
             if not blocks:
                 st.markdown(txt)
