@@ -1,0 +1,224 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* STEM Bot Design System - iOS-17 Glassmorphism + Premium Polish */
+
+@layer base {
+  :root {
+    /* Modern color palette - Indigo & Emerald */
+    --background: 248 250 252;
+    --foreground: 15 23 42;
+    --surface: 255 255 255;
+    --surface-glass: 255 255 255 / 0.8;
+    
+    /* Glass morphism colors */
+    --glass-light: 255 255 255 / 0.1;
+    --glass-medium: 255 255 255 / 0.2;
+    --glass-strong: 255 255 255 / 0.5;
+    --glass-border: 255 255 255 / 0.3;
+    
+    /* Brand gradient - Modern Indigo to Emerald */
+    --gradient-brand: linear-gradient(135deg, 99 102 241, 16 185 129);
+    --gradient-brand-hover: linear-gradient(135deg, 79 70 229, 5 150 105);
+    --gradient-subtle: linear-gradient(135deg, 248 250 252, 241 245 249);
+    --gradient-accent: linear-gradient(135deg, 167 243 208, 196 181 253);
+    
+    /* Text colors */
+    --text-primary: 15 23 42;
+    --text-secondary: 71 85 105;
+    --text-muted: 148 163 184;
+    --text-accent: 99 102 241;
+    
+    /* UI colors */
+    --border-light: 226 232 240;
+    --border-medium: 203 213 225;
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+    --shadow-lg: 0 20px 25px -5px rgb(0 0 0 / 0.1);
+    --shadow-glass: 0 8px 32px 0 rgb(99 102 241 / 0.15);
+    --shadow-glow: 0 0 40px rgb(16 185 129 / 0.3);
+    
+    /* Standard shadcn tokens for compatibility */
+    --card: 255 255 255;
+    --card-foreground: 15 23 42;
+    --popover: 255 255 255;
+    --popover-foreground: 15 23 42;
+    --primary: 99 102 241;
+    --primary-foreground: 248 250 252;
+    --secondary: 241 245 249;
+    --secondary-foreground: 15 23 42;
+    --muted: 241 245 249;
+    --muted-foreground: 100 116 139;
+    --accent: 241 245 249;
+    --accent-foreground: 15 23 42;
+    --destructive: 239 68 68;
+    --destructive-foreground: 248 250 252;
+    --border: 226 232 240;
+    --input: 226 232 240;
+    --ring: 99 102 241;
+    --radius: 1rem;
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    /* Dark mode colors */
+    --background: 15 23 42;
+    --foreground: 226 232 240;
+    --surface: 30 41 59;
+    --surface-glass: 30 41 59 / 0.8;
+    
+    /* Glass morphism colors */
+    --glass-light: 30 41 59 / 0.2;
+    --glass-medium: 30 41 59 / 0.3;
+    --glass-strong: 30 41 59 / 0.6;
+    --glass-border: 30 41 59 / 0.4;
+    
+    /* Brand gradient - Modern Indigo to Emerald (same) */
+    --gradient-brand: linear-gradient(135deg, 99 102 241, 16 185 129);
+    --gradient-brand-hover: linear-gradient(135deg, 79 70 229, 5 150 105);
+    --gradient-subtle: linear-gradient(135deg, 15 23 42, 30 41 59);
+    --gradient-accent: linear-gradient(135deg, 52 211 153, 139 92 246);
+    
+    /* Text colors */
+    --text-primary: 248 250 252;
+    --text-secondary: 203 213 225;
+    --text-muted: 148 163 184;
+    --text-accent: 99 102 241;
+    
+    /* UI colors */
+    --border-light: 71 85 105;
+    --border-medium: 100 116 139;
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.1);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.2);
+    --shadow-lg: 0 20px 25px -5px rgb(0 0 0 / 0.3);
+    --shadow-glass: 0 8px 32px 0 rgb(99 102 241 / 0.2);
+    --shadow-glow: 0 0 40px rgb(16 185 129 / 0.4);
+    
+    /* Standard shadcn tokens for compatibility */
+    --card: 30 41 59;
+    --card-foreground: 248 250 252;
+    --popover: 30 41 59;
+    --popover-foreground: 248 250 252;
+    --primary: 99 102 241;
+    --primary-foreground: 15 23 42;
+    --secondary: 51 65 85;
+    --secondary-foreground: 248 250 252;
+    --muted: 51 65 85;
+    --muted-foreground: 148 163 184;
+    --accent: 51 65 85;
+    --accent-foreground: 248 250 252;
+    --destructive: 239 68 68;
+    --destructive-foreground: 248 250 252;
+    --border: 71 85 105;
+    --input: 71 85 105;
+    --ring: 99 102 241;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    /* Modern subtle texture */
+    background-image: 
+      radial-gradient(circle at 25px 25px, rgba(99,102,241,0.03) 2px, transparent 0),
+      radial-gradient(circle at 75px 75px, rgba(16,185,129,0.02) 1px, transparent 0);
+    background-size: 100px 100px, 150px 150px;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@layer utilities {
+  /* Glass morphism utilities */
+  .glass-light {
+    background: hsl(var(--glass-light));
+    backdrop-filter: blur(10px);
+    border: 1px solid hsl(var(--glass-border));
+  }
+  
+  .glass-medium {
+    background: hsl(var(--glass-medium));
+    backdrop-filter: blur(16px);
+    border: 1px solid hsl(var(--glass-border));
+  }
+  
+  .glass-strong {
+    background: hsl(var(--glass-strong));
+    backdrop-filter: blur(24px);
+    border: 1px solid hsl(var(--glass-border));
+  }
+
+  /* Brand gradients */
+  .gradient-brand {
+    background: var(--gradient-brand);
+  }
+  
+  .gradient-brand-hover {
+    background: var(--gradient-brand-hover);
+  }
+  
+  .gradient-subtle {
+    background: var(--gradient-subtle);
+  }
+
+  .gradient-accent {
+    background: var(--gradient-accent);
+  }
+
+  /* Text colors */
+  .text-primary {
+    color: hsl(var(--text-primary));
+  }
+  
+  .text-secondary {
+    color: hsl(var(--text-secondary));
+  }
+  
+  .text-muted {
+    color: hsl(var(--text-muted));
+  }
+  
+  .text-accent {
+    color: hsl(var(--text-accent));
+  }
+
+  /* Custom shadows */
+  .shadow-glass {
+    box-shadow: var(--shadow-glass);
+  }
+
+  .shadow-glow {
+    box-shadow: var(--shadow-glow);
+  }
+
+  /* Smooth transitions */
+  .transition-smooth {
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .transition-medium {
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
